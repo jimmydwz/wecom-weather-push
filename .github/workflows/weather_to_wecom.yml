@@ -16,7 +16,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
 
-      - name: Fetch weather (today & tomorrow) and push to WeCom
+      - name: Fetch weather and push
         shell: bash
         run: |
           set -euo pipefail
@@ -26,29 +26,49 @@ jobs:
             exit 2
           fi
 
-          fetch_city () {
-            local name="$1"
-            local lat="$2"
-            local lon="$3"
-            local tz="$4"
+          ny_json="$(curl -fsS "https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America/New_York&forecast_days=2")"
+          la_json="$(curl -fsS "https://api.open-meteo.com/v1/forecast?latitude=34.0522&longitude=-118.2437&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America/Los_Angeles&forecast_days=2")"
 
-            local url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=${tz}&forecast_days=2"
-            local json
-            json="$(curl -fsS "$url")"
+          ny_d0="$(jq -r '.daily.time[0] // empty' <<<"$ny_json")"
+          ny_d1="$(jq -r '.daily.time[1] // empty' <<<"$ny_json")"
+          ny_tmax0="$(jq -r '.daily.temperature_2m_max[0] // empty' <<<"$ny_json")"
+          ny_tmin0="$(jq -r '.daily.temperature_2m_min[0] // empty' <<<"$ny_json")"
+          ny_pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$ny_json")"
+          ny_tmax1="$(jq -r '.daily.temperature_2m_max[1] // empty' <<<"$ny_json")"
+          ny_tmin1="$(jq -r '.daily.temperature_2m_min[1] // empty' <<<"$ny_json")"
+          ny_pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$ny_json")"
 
-            local d0 d1 tmax0 tmin0 pop0 tmax1 tmin1 pop1
-            d0="$(jq -r '.daily.time[0] // empty' <<<"$json")"
-            d1="$(jq -r '.daily.time[1] // empty' <<<"$json")"
+          la_d0="$(jq -r '.daily.time[0] // empty' <<<"$la_json")"
+          la_d1="$(jq -r '.daily.time[1] // empty' <<<"$la_json")"
+          la_tmax0="$(jq -r '.daily.temperature_2m_max[0] // empty' <<<"$la_json")"
+          la_tmin0="$(jq -r '.daily.temperature_2m_min[0] // empty' <<<"$la_json")"
+          la_pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$la_json")"
+          la_tmax1="$(jq -r '.daily.temperature_2m_max[1] // empty' <<<"$la_json")"
+          la_tmin1="$(jq -r '.daily.temperature_2m_min[1] // empty' <<<"$la_json")"
+          la_pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$la_json")"
 
-            tmax0="$(jq -r '.daily.temperature_2m_max[0] // empty' <<<"$json")"
-            tmin0="$(jq -r '.daily.temperature_2m_min[0] // empty' <<<"$json")"
-            pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$json")"
+          if [ -z "$ny_d0" ] || [ -z "$ny_d1" ] || [ -z "$ny_tmax0" ] || [ -z "$ny_tmin0" ] || [ -z "$ny_tmax1" ] || [ -z "$ny_tmin1" ]; then
+            echo "NY data missing"
+            echo "$ny_json"
+            exit 2
+          fi
 
-            tmax1="$(jq -r '.daily.temperature_2m_max[1] // empty' <<<"$json")"
-            tmin1="$(jq -r '.daily.temperature_2m_min[1] // empty' <<<"$json")"
-            pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$json")"
+          if [ -z "$la_d0" ] || [ -z "$la_d1" ] || [ -z "$la_tmax0" ] || [ -z "$la_tmin0" ] || [ -z "$la_tmax1" ] || [ -z "$la_tmin1" ]; then
+            echo "LA data missing"
+            echo "$la_json"
+            exit 2
+          fi
 
-            if [ -z "$d0" ] || [ -z "$d1" ] || [ -z "$tmax0" ] || [ -z "$tmin0" ] || [ -z "$tmax1" ] || [ -z "$tmin1" ]; then
-              echo "Open-Meteo daily data missing for $name"
-              echo "$json"
-              ex
+          content="$(printf "### 🌤️ 纽约 & 洛杉矶天气预报（今天/明天）\n\n**纽约 New York**\n- 今天（%s）：%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s°C / %s°C；降水 %s%%\n\n**洛杉矶 Los Angeles**\n- 今天（%s）：%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s°C / %s°C；降水 %s%%\n" \
+            "$ny_d0" "$ny_tmax0" "$ny_tmin0" "$ny_pop0" "$ny_d1" "$ny_tmax1" "$ny_tmin1" "$ny_pop1" \
+            "$la_d0" "$la_tmax0" "$la_tmin0" "$la_pop0" "$la_d1" "$la_tmax1" "$la_tmin1" "$la_pop1")"
+
+          payload="$(jq -n --arg c "$content" '{msgtype:"markdown", markdown:{content:$c}}')"
+          resp="$(curl -fsS -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" -d "$payload")"
+          echo "WeCom response: $resp"
+
+          errcode="$(jq -r '.errcode // -1' <<<"$resp")"
+          if [ "$errcode" != "0" ]; then
+            echo "Push failed"
+            exit 2
+          fi

@@ -53,8 +53,24 @@ jobs:
             echo "${name}|${d0}|${tmax0}|${tmin0}|${pop0}|${d1}|${tmax1}|${tmin1}|${pop1}"
           }
 
-          ny="$(fetch_city "纽约 New York" "40.7128" "-74.0060" "America/New_York")"
-          la="$(fetch_city "洛杉矶 Los Angeles" "34.0522" "-118.2437" "America/Los_Angeles")"
+# 用 | 作为分隔符直接读入（名字里有空格也不怕）
+IFS='|' read -r ny_name ny_d0 ny_tmax0 ny_tmin0 ny_pop0 ny_d1 ny_tmax1 ny_tmin1 ny_pop1 <<< "$ny"
+IFS='|' read -r la_name la_d0 la_tmax0 la_tmin0 la_pop0 la_d1 la_tmax1 la_tmin1 la_pop1 <<< "$la"
+
+# 用 heredoc 生成“真实换行”的 markdown 内容（不再出现 nn）
+content=$(cat <<EOF
+### 🌤️ 纽约 & 洛杉矶天气预报（今天/明天）
+
+**${ny_name}**
+- 今天（${ny_d0}）：${ny_tmax0}°C / ${ny_tmin0}°C；降水 ${ny_pop0}%
+- 明天（${ny_d1}）：${ny_tmax1}°C / ${ny_tmin1}°C；降水 ${ny_pop1}%
+
+**${la_name}**
+- 今天（${la_d0}）：${la_tmax0}°C / ${la_tmin0}°C；降水 ${la_pop0}%
+- 明天（${la_d1}）：${la_tmax1}°C / ${la_tmin1}°C；降水 ${la_pop1}%
+EOF
+)
+
 
           parse () {
             local s="$1"

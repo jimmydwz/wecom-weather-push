@@ -17,12 +17,13 @@ jobs:
           sudo apt-get install -y jq
 
       - name: Fetch weather (today & tomorrow) and push to WeCom
+        shell: bash
         run: |
           set -euo pipefail
 
           if [ -z "${WECOM_WEBHOOK:-}" ]; then
             echo "Missing secret WECOM_WEBHOOK"
-            exit 1
+            exit 2
           fi
 
           fetch_city () {
@@ -34,13 +35,57 @@ jobs:
             local url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=${tz}&forecast_days=2"
 
             local json
-            json="$(curl -sS "$url")"
+            json="$(curl -fsS "$url")"
 
-            # index 0 = today, index 1 = tomorrow (按该城市 timezone)
+            # 取 today/tomorrow
             local d0 d1 tmax0 tmin0 pop0 tmax1 tmin1 pop1
-            d0="$(echo "$json" | jq -r '.daily.time[0]')"
-            d1="$(echo "$json" | jq -r '.daily.time[1]')"
+            d0="$(jq -r '.daily.time[0] // empty' <<<"$json")"
+            d1="$(jq -r '.daily.time[1] // empty' <<<"$json")"
 
-            tmax0="$(echo "$json" | jq -r '.daily.temperature_2m_max[0]')"
-            tmin0="$(echo "$json" | jq -r '.daily.temperature_2m_min[0]')"
-            pop0="$(echo "$json" | jq -r '.daily.precipitation_probability_max[0] // 0
+            tmax0="$(jq -r '.daily.temperature_2m_max[0] // empty' <<<"$json")"
+            tmin0="$(jq -r '.daily.temperature_2m_min[0] // empty' <<<"$json")"
+            pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$json")"
+
+            tmax1="$(jq -r '.daily.temperature_2m_max[1] // empty' <<<"$json")"
+            tmin1="$(jq -r '.daily.temperature_2m_min[1] // empty' <<<"$json")"
+            pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$json")"
+
+            if [ -z "$d0" ] || [ -z "$d1" ] || [ -z "$tmax0" ] || [ -z "$tmin0" ] || [ -z "$tmax1" ] || [ -z "$tmin1" ]; then
+              echo "Open-Meteo daily data missing for $name"
+              echo "$json"
+              exit 2
+            fi
+
+            # 用 | 分隔返回（名字里有空格不影响）
+            echo "${name}|${d0}|${tmax0}|${tmin0}|${pop0}|${d1}|${tmax1}|${tmin1}|${pop1}"
+          }
+
+          ny="$(fetch_city "纽约 New York" "40.7128" "-74.0060" "America/New_York")"
+          la="$(fetch_city "洛杉矶 Los Angeles" "34.0522" "-118.2437" "America/Los_Angeles")"
+
+          IFS='|' read -r ny_name ny_d0 ny_tmax0 ny_tmin0 ny_pop0 ny_d1 ny_tmax1 ny_tmin1 ny_pop1 <<< "$ny"
+          IFS='|' read -r la_name la_d0 la_tmax0 la_tmin0 la_pop0 la_d1 la_tmax1 la_tmin1 la_pop1 <<< "$la"
+
+          content=$(cat <<EOF
+### 🌤️ 纽约 & 洛杉矶天气预报（今天/明天）
+
+**${ny_name}**
+- 今天（${ny_d0}）：${ny_tmax0}°C / ${ny_tmin0}°C；降水 ${ny_pop0}%
+- 明天（${ny_d1}）：${ny_tmax1}°C / ${ny_tmin1}°C；降水 ${ny_pop1}%
+
+**${la_name}**
+- 今天（${la_d0}）：${la_tmax0}°C / ${la_tmin0}°C；降水 ${la_pop0}%
+- 明天（${la_d1}）：${la_tmax1}°C / ${la_tmin1}°C；降水 ${la_pop1}%
+EOF
+)
+
+          payload="$(jq -n --arg c "$content" '{msgtype:"markdown", markdown:{content:$c}}')"
+
+          resp="$(curl -fsS -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" -d "$payload")"
+          echo "WeCom response: $resp"
+
+          errcode="$(jq -r '.errcode // -1' <<<"$resp")"
+          if [ "$errcode" != "0" ]; then
+            echo "Push failed"
+            exit 2
+          fi

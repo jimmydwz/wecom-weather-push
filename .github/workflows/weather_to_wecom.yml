@@ -57,48 +57,67 @@ jobs:
             esac
           }
 
-          # === New York ===
-          ny_json="$(curl -fsS "https://api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode&timezone=America/New_York&forecast_days=2")"
+          fetch_two_days () {
+            # args: city_label lat lon timezone
+            local label="$1"
+            local lat="$2"
+            local lon="$3"
+            local tz="$4"
 
-          ny_d0="$(jq -r '.daily.time[0]' <<<"$ny_json")"
-          ny_d1="$(jq -r '.daily.time[1]' <<<"$ny_json")"
-          ny_tmax0="$(jq -r '.daily.temperature_2m_max[0]' <<<"$ny_json")"
-          ny_tmin0="$(jq -r '.daily.temperature_2m_min[0]' <<<"$ny_json")"
-          ny_pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$ny_json")"
-          ny_code0="$(jq -r '.daily.weathercode[0]' <<<"$ny_json")"
+            local json
+            json="$(curl -fsS "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode&timezone=${tz}&forecast_days=2")"
 
-          ny_tmax1="$(jq -r '.daily.temperature_2m_max[1]' <<<"$ny_json")"
-          ny_tmin1="$(jq -r '.daily.temperature_2m_min[1]' <<<"$ny_json")"
-          ny_pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$ny_json")"
-          ny_code1="$(jq -r '.daily.weathercode[1]' <<<"$ny_json")"
+            local d0 d1 tmax0 tmin0 pop0 code0 tmax1 tmin1 pop1 code1
+            d0="$(jq -r '.daily.time[0] // empty' <<<"$json")"
+            d1="$(jq -r '.daily.time[1] // empty' <<<"$json")"
+            tmax0="$(jq -r '.daily.temperature_2m_max[0] // empty' <<<"$json")"
+            tmin0="$(jq -r '.daily.temperature_2m_min[0] // empty' <<<"$json")"
+            pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$json")"
+            code0="$(jq -r '.daily.weathercode[0] // empty' <<<"$json")"
+            tmax1="$(jq -r '.daily.temperature_2m_max[1] // empty' <<<"$json")"
+            tmin1="$(jq -r '.daily.temperature_2m_min[1] // empty' <<<"$json")"
+            pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$json")"
+            code1="$(jq -r '.daily.weathercode[1] // empty' <<<"$json")"
 
-          ny_desc0="$(weather_desc "$ny_code0")"
-          ny_desc1="$(weather_desc "$ny_code1")"
+            if [ -z "$d0" ] || [ -z "$d1" ] || [ -z "$tmax0" ] || [ -z "$tmin0" ] || [ -z "$tmax1" ] || [ -z "$tmin1" ] || [ -z "$code0" ] || [ -z "$code1" ]; then
+              echo "Data missing for ${label}"
+              echo "$json"
+              exit 2
+            fi
 
-          # === Los Angeles ===
-          la_json="$(curl -fsS "https://api.open-meteo.com/v1/forecast?latitude=34.0522&longitude=-118.2437&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode&timezone=America/Los_Angeles&forecast_days=2")"
+            local desc0 desc1
+            desc0="$(weather_desc "$code0")"
+            desc1="$(weather_desc "$code1")"
 
-          la_d0="$(jq -r '.daily.time[0]' <<<"$la_json")"
-          la_d1="$(jq -r '.daily.time[1]' <<<"$la_json")"
-          la_tmax0="$(jq -r '.daily.temperature_2m_max[0]' <<<"$la_json")"
-          la_tmin0="$(jq -r '.daily.temperature_2m_min[0]' <<<"$la_json")"
-          la_pop0="$(jq -r '.daily.precipitation_probability_max[0] // 0' <<<"$la_json")"
-          la_code0="$(jq -r '.daily.weathercode[0]' <<<"$la_json")"
+            # 输出：label|d0|desc0|tmax0|tmin0|pop0|d1|desc1|tmax1|tmin1|pop1
+            echo "${label}|${d0}|${desc0}|${tmax0}|${tmin0}|${pop0}|${d1}|${desc1}|${tmax1}|${tmin1}|${pop1}"
+          }
 
-          la_tmax1="$(jq -r '.daily.temperature_2m_max[1]' <<<"$la_json")"
-          la_tmin1="$(jq -r '.daily.temperature_2m_min[1]' <<<"$la_json")"
-          la_pop1="$(jq -r '.daily.precipitation_probability_max[1] // 0' <<<"$la_json")"
-          la_code1="$(jq -r '.daily.weathercode[1]' <<<"$la_json")"
+          # 纽约 / 洛杉矶
+          ny="$(fetch_two_days "纽约 New York" "40.7128" "-74.0060" "America/New_York")"
+          la="$(fetch_two_days "洛杉矶 Los Angeles" "34.0522" "-118.2437" "America/Los_Angeles")"
 
-          la_desc0="$(weather_desc "$la_code0")"
-          la_desc1="$(weather_desc "$la_code1")"
+          # 多伦多 / 卡尔加里
+          tor="$(fetch_two_days "多伦多 Toronto" "43.6532" "-79.3832" "America/Toronto")"
+          cal="$(fetch_two_days "卡尔加里 Calgary" "51.0447" "-114.0719" "America/Edmonton")"
 
-          content="$(printf "### 🌤️ 纽约 & 洛杉矶天气预报（今天/明天）\n\n**纽约 New York**\n- 今天（%s）：%s；%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s；%s°C / %s°C；降水 %s%%\n\n**洛杉矶 Los Angeles**\n- 今天（%s）：%s；%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s；%s°C / %s°C；降水 %s%%\n" \
-            "$ny_d0" "$ny_desc0" "$ny_tmax0" "$ny_tmin0" "$ny_pop0" \
-            "$ny_d1" "$ny_desc1" "$ny_tmax1" "$ny_tmin1" "$ny_pop1" \
-            "$la_d0" "$la_desc0" "$la_tmax0" "$la_tmin0" "$la_pop0" \
-            "$la_d1" "$la_desc1" "$la_tmax1" "$la_tmin1" "$la_pop1")"
+          IFS='|' read -r ny_name ny_d0 ny_desc0 ny_tmax0 ny_tmin0 ny_pop0 ny_d1 ny_desc1 ny_tmax1 ny_tmin1 ny_pop1 <<< "$ny"
+          IFS='|' read -r la_name la_d0 la_desc0 la_tmax0 la_tmin0 la_pop0 la_d1 la_desc1 la_tmax1 la_tmin1 la_pop1 <<< "$la"
+          IFS='|' read -r tor_name tor_d0 tor_desc0 tor_tmax0 tor_tmin0 tor_pop0 tor_d1 tor_desc1 tor_tmax1 tor_tmin1 tor_pop1 <<< "$tor"
+          IFS='|' read -r cal_name cal_d0 cal_desc0 cal_tmax0 cal_tmin0 cal_pop0 cal_d1 cal_desc1 cal_tmax1 cal_tmin1 cal_pop1 <<< "$cal"
+
+          content="$(printf "### 🌤️ 天气预报（今天/明天）\n\n**%s**\n- 今天（%s）：%s；%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s；%s°C / %s°C；降水 %s%%\n\n**%s**\n- 今天（%s）：%s；%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s；%s°C / %s°C；降水 %s%%\n\n**%s**\n- 今天（%s）：%s；%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s；%s°C / %s°C；降水 %s%%\n\n**%s**\n- 今天（%s）：%s；%s°C / %s°C；降水 %s%%\n- 明天（%s）：%s；%s°C / %s°C；降水 %s%%\n" \
+            "$ny_name" "$ny_d0" "$ny_desc0" "$ny_tmax0" "$ny_tmin0" "$ny_pop0" "$ny_d1" "$ny_desc1" "$ny_tmax1" "$ny_tmin1" "$ny_pop1" \
+            "$la_name" "$la_d0" "$la_desc0" "$la_tmax0" "$la_tmin0" "$la_pop0" "$la_d1" "$la_desc1" "$la_tmax1" "$la_tmin1" "$la_pop1" \
+            "$tor_name" "$tor_d0" "$tor_desc0" "$tor_tmax0" "$tor_tmin0" "$tor_pop0" "$tor_d1" "$tor_desc1" "$tor_tmax1" "$tor_tmin1" "$tor_pop1" \
+            "$cal_name" "$cal_d0" "$cal_desc0" "$cal_tmax0" "$cal_tmin0" "$cal_pop0" "$cal_d1" "$cal_desc1" "$cal_tmax1" "$cal_tmin1" "$cal_pop1")"
 
           payload="$(jq -n --arg c "$content" '{msgtype:"markdown", markdown:{content:$c}}')"
           resp="$(curl -fsS -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" -d "$payload")"
           echo "WeCom response: $resp"
+
+          errcode="$(jq -r '.errcode // -1' <<<"$resp")"
+          if [ "$errcode" != "0" ]; then
+            echo "Push failed"
+            exit 2
+          fi

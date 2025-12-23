@@ -1,0 +1,77 @@
+name: Weather to WeCom
+
+on:
+  schedule:
+    # GitHub Actions 的 cron 是 UTC 时间
+    # 纽约冬令时(EST, UTC-5)：08:30 = 13:30 UTC
+    # 夏令时(EDT, UTC-4)：08:30 = 12:30 UTC（需要你手动改一下）
+    - cron: "30 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    env:
+      WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+    steps:
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Fetch weather and push to WeCom
+        run: |
+          set -euo pipefail
+
+          if [ -z "${WECOM_WEBHOOK:-}" ]; then
+            echo "Missing secret WECOM_WEBHOOK"
+            exit 1
+          fi
+
+          fetch_city () {
+            local name="$1"
+            local lat="$2"
+            local lon="$3"
+            local tz="$4"
+
+            local url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=${tz}&forecast_days=1"
+
+            local json
+            json="$(curl -sS "$url")"
+
+            local date tmax tmin pop
+            date="$(echo "$json" | jq -r '.daily.time[0]')"
+            tmax="$(echo "$json" | jq -r '.daily.temperature_2m_max[0]')"
+            tmin="$(echo "$json" | jq -r '.daily.temperature_2m_min[0]')"
+            pop="$(echo "$json" | jq -r '.daily.precipitation_probability_max[0]')"
+
+            echo "${name}（${date}）|${tmax}|${tmin}|${pop}"
+          }
+
+          ny="$(fetch_city "纽约 New York" "40.7128" "-74.0060" "America/New_York")"
+          la="$(fetch_city "洛杉矶 Los Angeles" "34.0522" "-118.2437" "America/Los_Angeles")"
+
+          ny_name="$(echo "$ny" | cut -d'|' -f1)"
+          ny_tmax="$(echo "$ny" | cut -d'|' -f2)"
+          ny_tmin="$(echo "$ny" | cut -d'|' -f3)"
+          ny_pop="$(echo "$ny" | cut -d'|' -f4)"
+
+          la_name="$(echo "$la" | cut -d'|' -f1)"
+          la_tmax="$(echo "$la" | cut -d'|' -f2)"
+          la_tmin="$(echo "$la" | cut -d'|' -f3)"
+          la_pop="$(echo "$la" | cut -d'|' -f4)"
+
+          # 组装企业微信 Markdown（注意换行用 \n）
+          content="### 🌤️ 每日天气预报\n\n**${ny_name}**\n- 最高/最低：${ny_tmax}°C / ${ny_tmin}°C\n- 降水概率：${ny_pop}%\n\n**${la_name}**\n- 最高/最低：${la_tmax}°C / ${la_tmin}°C\n- 降水概率：${la_pop}%\n"
+
+          payload="$(jq -n --arg c "$content" '{msgtype:"markdown", markdown:{content:$c}}')"
+
+          resp="$(curl -sS -X POST "$WECOM_WEBHOOK" -H "Content-Type: application/json" -d "$payload")"
+          echo "WeCom response: $resp"
+
+          # 企业微信成功一般 errcode=0
+          errcode="$(echo "$resp" | jq -r '.errcode // -1')"
+          if [ "$errcode" != "0" ]; then
+            echo "Push failed"
+            exit 1
+          fi
